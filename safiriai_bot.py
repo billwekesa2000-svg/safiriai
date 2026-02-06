@@ -284,7 +284,7 @@ What kind of safari experience are you looking for?"""
         
         # Show summary
         summary = f"""
-*📋 Booking Summary*
+📋 *Booking Summary*
 
 *Safari:* {context.user_data.get('safari_type', 'N/A')}
 *Dates:* {context.user_data.get('dates', 'N/A')}
@@ -292,12 +292,11 @@ What kind of safari experience are you looking for?"""
 *Budget:* {context.user_data.get('budget', 'N/A')}
 *Accommodation:* {context.user_data.get('accommodation', 'N/A')}
 *Dietary:* {context.user_data.get('dietary', 'N/A')}
-*Guest Info:* {' \\| '.join(context.user_data.get('passport_info', []))}
-
-
+*Guest Info:* {', '.join(context.user_data.get('passport_info', []))}
 
 Is this information correct? ✅
 """
+
         
         keyboard = [['Yes, Proceed to Payment ✅', 'Edit Information 📝']]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
