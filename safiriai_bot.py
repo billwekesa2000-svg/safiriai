@@ -279,6 +279,7 @@ What kind of safari experience are you looking for?"""
 *Guest Info:* {' \\| '.join(context.user_data.get('passport_info', []))}
 
 
+
 Is this information correct? ✅
 """
         
@@ -378,6 +379,9 @@ We're excited to host you in Kenya! 🦁🌍
 /packages - View safari packages  
 /contact - Contact information
 /help - This message
+    async def test_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test if bot is responding"""
+        await update.message.reply_text("✅ Bot is working! I can receive messages.")
 
 *Need Human Help?*
 📞 +254 724 630 030 (Call/WhatsApp)
@@ -419,6 +423,9 @@ We respond within 1 hour during office hours! 🚀
     def run(self):
         """Run the bot"""
         # Create application
+                # Test handler - MUST be first
+        application.add_handler(CommandHandler('test', self.test_command))
+
         application = Application.builder().token(self.telegram_token).build()
         
         # Conversation handler for booking flow
