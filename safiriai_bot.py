@@ -276,7 +276,8 @@ What kind of safari experience are you looking for?"""
 *Budget:* {context.user_data.get('budget', 'N/A')}
 *Accommodation:* {context.user_data.get('accommodation', 'N/A')}
 *Dietary:* {context.user_data.get('dietary', 'N/A')}
-*Guest Info:* {', '.join(context.user_data.get('passport_info', []))}
+*Guest Info:* {' \\| '.join(context.user_data.get('passport_info', []))}
+
 
 Is this information correct? ✅
 """
