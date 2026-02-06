@@ -5,6 +5,22 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from openai import OpenAI
 from datetime import datetime
 import json
+from flask import Flask
+from threading import Thread
+# Flask app for Render health check
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "SafiriAI Bot is running! 🦁", 200
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
 
 # Setup logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -425,7 +441,9 @@ We respond within 1 hour during office hours! 🚀
         
 
         application = Application.builder().token(self.telegram_token).build()
-        
+                # Start Flask server in background thread
+        Thread(target=run_flask, daemon=True).start()
+
         # Conversation handler for booking flow
         conv_handler = ConversationHandler(
             entry_points=[
