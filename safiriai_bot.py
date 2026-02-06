@@ -283,19 +283,19 @@ What kind of safari experience are you looking for?"""
         context.user_data['passport_info'].append(update.message.text)
         
         # Show summary
-        summary = f"""
-📋 *Booking Summary*
+                # Show summary
+        summary = (
+            "📋 *Booking Summary*\n\n"
+            f"*Safari:* {context.user_data.get('safari_type', 'N/A')}\n"
+            f"*Dates:* {context.user_data.get('dates', 'N/A')}\n"
+            f"*Travelers:* {context.user_data.get('travelers', 'N/A')}\n"
+            f"*Budget:* {context.user_data.get('budget', 'N/A')}\n"
+            f"*Accommodation:* {context.user_data.get('accommodation', 'N/A')}\n"
+            f"*Dietary:* {context.user_data.get('dietary', 'N/A')}\n"
+            f"*Guest Info:* {', '.join(context.user_data.get('passport_info', []))}\n\n"
+            "Is this information correct? ✅"
+        )
 
-*Safari:* {context.user_data.get('safari_type', 'N/A')}
-*Dates:* {context.user_data.get('dates', 'N/A')}
-*Travelers:* {context.user_data.get('travelers', 'N/A')}
-*Budget:* {context.user_data.get('budget', 'N/A')}
-*Accommodation:* {context.user_data.get('accommodation', 'N/A')}
-*Dietary:* {context.user_data.get('dietary', 'N/A')}
-*Guest Info:* {', '.join(context.user_data.get('passport_info', []))}
-
-Is this information correct? ✅
-"""
 
         
         keyboard = [['Yes, Proceed to Payment ✅', 'Edit Information 📝']]
