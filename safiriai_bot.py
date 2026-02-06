@@ -14,7 +14,7 @@ app = Flask(**name**)
 
 @app.route(’/’)
 def home():
-return “SafiriAI Bot is running! 🦁”, 200
+return “SafiriAI Bot is running!”, 200
 
 @app.route(’/health’)
 def health():
@@ -138,22 +138,24 @@ async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start command - welcome message"""
     user = update.effective_user
     
-    welcome_message = f"""🦁 Welcome to SafiriAI! 🌍
+    welcome_message = f"""Welcome to SafiriAI!
 ```
 
 Hello {user.first_name}! I’m your safari planning assistant for unforgettable Kenyan adventures.
 
 I can help you:
-✅ Plan your perfect safari
-✅ Book accommodations
-✅ Arrange airport transfers
-✅ Create custom itineraries
+
+- Plan your perfect safari
+- Book accommodations
+- Arrange airport transfers
+- Create custom itineraries
 
 Popular Safaris:
-🐘 Masai Mara - The Great Migration
-🗻 Amboseli - Mt. Kilimanjaro Views  
-🦏 Tsavo East & West - Red Elephants
-🏖️ Beach & Safari Combos
+
+- Masai Mara - The Great Migration
+- Amboseli - Mt. Kilimanjaro Views
+- Tsavo East & West - Red Elephants
+- Beach & Safari Combos
 
 What kind of safari experience are you looking for?”””
 
@@ -174,16 +176,16 @@ async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def safari_packages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show available safari packages"""
-    packages_text = "🦁 SafiriAI Safari Packages 🦁\n\n"
+    packages_text = "SafiriAI Safari Packages\n\n"
     
     for key, pkg in SAFARI_PACKAGES.items():
         if key != "custom":
             packages_text += f"{pkg['name']}\n"
-            packages_text += f"📅 {pkg['duration']}\n"
-            packages_text += f"💰 From KES {pkg['price_budget']:,} per person\n"
-            packages_text += f"📝 {pkg['description']}\n\n"
+            packages_text += f"Duration: {pkg['duration']}\n"
+            packages_text += f"From KES {pkg['price_budget']:,} per person\n"
+            packages_text += f"{pkg['description']}\n\n"
     
-    packages_text += "\n💬 Tell me which safari interests you, or describe your dream safari!"
+    packages_text += "\nTell me which safari interests you, or describe your dream safari!"
     
     await update.message.reply_text(packages_text)
     return MAIN_MENU
@@ -198,7 +200,7 @@ async def book_safari(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     
     await update.message.reply_text(
-        "Great! Which safari would you like to book? 🦁",
+        "Great! Which safari would you like to book?",
         reply_markup=reply_markup
     )
     return SAFARI_TYPE
@@ -208,7 +210,7 @@ async def safari_type_selected(self, update: Update, context: ContextTypes.DEFAU
     context.user_data['safari_type'] = update.message.text
     
     await update.message.reply_text(
-        f"Excellent choice! ✨\n\n"
+        f"Excellent choice!\n\n"
         f"When would you like to travel?\n"
         f"Please provide your preferred dates (e.g., 'March 15-18, 2026' or 'Flexible in April 2026')",
         reply_markup=ReplyKeyboardRemove()
@@ -220,7 +222,7 @@ async def dates_received(self, update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['dates'] = update.message.text
     
     await update.message.reply_text(
-        "Perfect! 📅\n\n"
+        "Perfect!\n\n"
         "How many travelers? (Adults and children if applicable)"
     )
     return TRAVELERS
@@ -236,7 +238,7 @@ async def travelers_received(self, update: Update, context: ContextTypes.DEFAULT
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     
     await update.message.reply_text(
-        "What's your budget preference? 💰",
+        "What's your budget preference?",
         reply_markup=reply_markup
     )
     return BUDGET
@@ -253,7 +255,7 @@ async def budget_received(self, update: Update, context: ContextTypes.DEFAULT_TY
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     
     await update.message.reply_text(
-        "What type of accommodation do you prefer? 🏕️",
+        "What type of accommodation do you prefer?",
         reply_markup=reply_markup
     )
     return ACCOMMODATION
@@ -292,7 +294,7 @@ async def passport_received(self, update: Update, context: ContextTypes.DEFAULT_
     
     # Show summary
     summary = (
-        "📋 Booking Summary\n\n"
+        "Booking Summary\n\n"
         f"Safari: {context.user_data.get('safari_type', 'N/A')}\n"
         f"Dates: {context.user_data.get('dates', 'N/A')}\n"
         f"Travelers: {context.user_data.get('travelers', 'N/A')}\n"
@@ -300,10 +302,10 @@ async def passport_received(self, update: Update, context: ContextTypes.DEFAULT_
         f"Accommodation: {context.user_data.get('accommodation', 'N/A')}\n"
         f"Dietary: {context.user_data.get('dietary', 'N/A')}\n"
         f"Guest Info: {', '.join(context.user_data.get('passport_info', []))}\n\n"
-        "Is this information correct? ✅"
+        "Is this information correct?"
     )
     
-    keyboard = [['Yes, Proceed to Payment ✅', 'Edit Information 📝']]
+    keyboard = [['Yes, Proceed to Payment', 'Edit Information']]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     
     await update.message.reply_text(summary, reply_markup=reply_markup)
@@ -328,7 +330,7 @@ async def confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE)
         total = base_price * num_travelers
         deposit = int(total * 0.3)  # 30% deposit
         
-        payment_message = f"""💳 Payment Information
+        payment_message = f"""Payment Information
 ```
 
 Total Estimate: KES {total:,}
@@ -337,25 +339,26 @@ Balance: KES {total - deposit:,} (payable before safari)
 
 M-Pesa Payment Instructions:
 
-1️⃣ Go to M-Pesa menu
-2️⃣ Select “Lipa na M-Pesa”
-3️⃣ Select “Buy Goods and Services”
-4️⃣ Enter Till Number: 6339189
-(Business Name: Rajiv Okemwa)
-5️⃣ Enter Amount: {deposit}
-6️⃣ Enter your M-Pesa PIN
+1. Go to M-Pesa menu
+1. Select “Lipa na M-Pesa”
+1. Select “Buy Goods and Services”
+1. Enter Till Number: 6339189
+   (Business Name: Rajiv Okemwa)
+1. Enter Amount: {deposit}
+1. Enter your M-Pesa PIN
 
 After Payment:
-📸 Screenshot the M-Pesa confirmation message
-📤 Send it here in the chat
+
+- Screenshot the M-Pesa confirmation message
+- Send it here in the chat
 
 Our team will verify and send your official booking confirmation within 1 hour!
 
 Questions?
-📞 Call/WhatsApp: +254 724 630 030
-📧 Email: safiraiofficial@gmail.com
+Phone/WhatsApp: +254 724 630 030
+Email: safiraiofficial@gmail.com
 
-We’re excited to host you in Kenya! 🦁🌍
+We’re excited to host you in Kenya!
 “””
 
 ```
@@ -376,7 +379,7 @@ We’re excited to host you in Kenya! 🦁🌍
         logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
         
         await update.message.reply_text(
-            "Once you send the M-Pesa screenshot, we'll confirm your booking! ✅\n\n"
+            "Once you send the M-Pesa screenshot, we'll confirm your booking!\n\n"
             "Type /start to make another booking or /help for assistance."
         )
         
@@ -391,7 +394,7 @@ We’re excited to host you in Kenya! 🦁🌍
 
 async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Help command"""
-    help_text = """🆘 SafiriAI Help
+    help_text = """SafiriAI Help
 ```
 
 Commands:
@@ -402,17 +405,17 @@ Commands:
 /help - This message
 
 Need Human Help?
-📞 +254 724 630 030 (Call/WhatsApp)
-📧 safiraiofficial@gmail.com
+Phone/WhatsApp: +254 724 630 030
+Email: safiraiofficial@gmail.com
 
-We’re here 24/7 to help plan your perfect Kenyan safari! 🦁
+We’re here 24/7 to help plan your perfect Kenyan safari!
 “””
 await update.message.reply_text(help_text)
 
 ```
 async def contact_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Contact information"""
-    contact_text = """📞 Contact SafiriAI
+    contact_text = """Contact SafiriAI
 ```
 
 Phone/WhatsApp:
@@ -427,7 +430,7 @@ Monday - Sunday: 8:00 AM - 8:00 PM EAT
 Emergency Contact:
 24/7 support for booked guests
 
-We respond within 1 hour during office hours! 🚀
+We respond within 1 hour during office hours!
 “””
 await update.message.reply_text(contact_text)
 
@@ -435,7 +438,7 @@ await update.message.reply_text(contact_text)
 async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel conversation"""
     await update.message.reply_text(
-        "Booking cancelled. Type /start when you're ready to plan your safari! 🦁",
+        "Booking cancelled. Type /start when you're ready to plan your safari!",
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
