@@ -150,7 +150,7 @@ I can help you:
 
 What kind of safari experience are you looking for?"""
         
-        await update.message.reply_text(welcome_message, parse_mode='Markdown')
+              await update.message.reply_text(welcome_message)
         return MAIN_MENU
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -177,7 +177,7 @@ What kind of safari experience are you looking for?"""
         
         packages_text += "\n💬 Tell me which safari interests you, or describe your dream safari!"
         
-        await update.message.reply_text(packages_text, parse_mode='Markdown')
+                await update.message.reply_text(packages_text)
         return MAIN_MENU
     
     async def book_safari(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -301,7 +301,7 @@ What kind of safari experience are you looking for?"""
         keyboard = [['Yes, Proceed to Payment ✅', 'Edit Information 📝']]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
-        await update.message.reply_text(summary, parse_mode='Markdown', reply_markup=reply_markup)
+               await update.message.reply_text(summary, reply_markup=reply_markup)
         return CONFIRM
     
     async def confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -353,8 +353,7 @@ Our team will verify and send your official booking confirmation within 1 hour!
 We're excited to host you in Kenya! 🦁🌍
 """
             
-            await update.message.reply_text(payment_message, parse_mode='Markdown', reply_markup=ReplyKeyboardRemove())
-            
+                        await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
             # Save booking data (you'd save to database here)
             booking_data = {
                 'timestamp': datetime.now().isoformat(),
@@ -402,7 +401,7 @@ We're excited to host you in Kenya! 🦁🌍
 
 We're here 24/7 to help plan your perfect Kenyan safari! 🦁
 """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+                await update.message.reply_text(help_text)
     
     async def contact_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Contact information"""
@@ -423,7 +422,7 @@ Monday - Sunday: 8:00 AM - 8:00 PM EAT
 
 We respond within 1 hour during office hours! 🚀
 """
-        await update.message.reply_text(contact_text, parse_mode='Markdown')
+                await update.message.reply_text(contact_text)
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel conversation"""
