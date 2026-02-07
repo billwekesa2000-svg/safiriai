@@ -431,30 +431,36 @@ Service Fee (4%): {self.format_price_with_usd(service_fee)}
 Total Cost: {self.format_price_with_usd(total)}
 
 DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
-Balance Due (14 days before safari): {self.format_price_with_usd(balance)}
+Balance Due (14 days before safari): {self.format_price_with_usd(balance)}"""
+                
+                await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
+                
+                # Send payment link as separate message for better visibility
+                payment_link_message = f"""💳 PAY YOUR DEPOSIT NOW:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+Click this link to pay securely with your card:
 
-💳 PAYMENT OPTIONS:
-
-OPTION 1 - International Card Payment (Recommended):
-👉 Click here to pay securely:
 {payment_url}
 
-Your receipt will be sent to: {user_email}
+Your payment receipt will be sent to:
+{user_email}"""
+                
+                await update.message.reply_text(payment_link_message)
+                
+                # Send M-Pesa alternative
+                mpesa_message = f"""📱 OR Pay via M-Pesa (Kenya only):
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📱 OPTION 2 - M-Pesa (Kenya only):
 1. Go to M-Pesa menu
-2. Select "Lipa na M-Pesa"
+2. Select "Lipa na M-Pesa"  
 3. Select "Buy Goods and Services"
 4. Enter Till: 6339189
 5. Enter Amount: {deposit}
 
-After payment, send your confirmation screenshot here and we'll verify within 1 hour!
+After payment, send your screenshot here for verification!
 
 Safari njema! 🦁🌍"""
+                
+                await update.message.reply_text(mpesa_message)
             else:
                 # Fallback if Paystack fails
                 payment_message = f"""Thank you for choosing SafiriAI! 🎉
@@ -467,19 +473,20 @@ Service Fee (4%): {self.format_price_with_usd(service_fee)}
 Total Cost: {self.format_price_with_usd(total)}
 
 DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
-Balance Due (14 days before safari): {self.format_price_with_usd(balance)}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-We're experiencing a temporary technical issue with our payment system.
+Balance Due (14 days before safari): {self.format_price_with_usd(balance)}"""
+            
+                await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
+                
+                error_message = """⚠️ We're experiencing a temporary technical issue with our payment system.
 
 Please contact us directly for payment instructions:
+
 📧 safiriaiofficial@gmail.com
 📞 +254 724 630 030
 
 We'll process your booking immediately!"""
-            
-            await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
+                
+                await update.message.reply_text(error_message)
             
             # Save booking data
             booking_data = {
@@ -502,10 +509,12 @@ We'll process your booking immediately!"""
             # Log booking for manual processing
             logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
             
-            await update.message.reply_text(
-                "Once payment is confirmed, we'll send your official booking confirmation! ✅\n\n"
-                "Type /start for a new booking."
-            )
+            # Final confirmation message
+            final_msg = """✅ Once payment is confirmed, we'll send your official booking details!
+
+Type /start to make another booking."""
+            
+            await update.message.reply_text(final_msg)
             
             return ConversationHandler.END
         else:
