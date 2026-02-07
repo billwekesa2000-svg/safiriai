@@ -158,6 +158,9 @@ You represent SafiriAI - a trusted Kenyan safari company specializing in unforge
         """Create Paystack payment link"""
         url = "https://api.paystack.co/transaction/initialize"
         
+        # Log what we're sending to Paystack
+        logger.info(f"Creating Paystack payment: email={email}, amount={amount}, reference={reference}")
+        
         headers = {
             "Authorization": f"Bearer {self.paystack_secret}",
             "Content-Type": "application/json"
@@ -167,21 +170,33 @@ You represent SafiriAI - a trusted Kenyan safari company specializing in unforge
             "email": email,
             "amount": int(amount * 100),  # Paystack uses kobo/cents
             "reference": reference,
-            "currency": "KES",
-            "callback_url": "https://safiriai.com/payment-success"
+            "currency": "KES"
         }
         
         try:
-            response = requests.post(url, headers=headers, json=data)
+            response = requests.post(url, headers=headers, json=data, timeout=10)
             result = response.json()
             
+            # Log full response for debugging
+            logger.info(f"Paystack response: {result}")
+            
             if result.get('status'):
-                return result['data']['authorization_url']
+                payment_url = result['data']['authorization_url']
+                logger.info(f"Payment URL generated successfully: {payment_url}")
+                return payment_url
             else:
-                logger.error(f"Paystack error: {result}")
+                # Log the exact error from Paystack
+                error_msg = result.get('message', 'Unknown error')
+                logger.error(f"Paystack returned status=False. Message: {error_msg}. Full response: {result}")
                 return None
+        except requests.exceptions.Timeout:
+            logger.error("Paystack API timeout - request took too long")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Paystack network error: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Paystack API error: {e}")
+            logger.error(f"Paystack unexpected error: {type(e).__name__} - {e}")
             return None
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
