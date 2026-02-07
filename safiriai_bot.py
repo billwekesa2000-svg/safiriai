@@ -2,7 +2,7 @@ import os
 import logging
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from openai import OpenAI
+from groq import Groq
 from datetime import datetime
 import json
 from flask import Flask
@@ -75,13 +75,13 @@ SAFARI_PACKAGES = {
 }
 
 class SafiriAIBot:
-    def __init__(self, telegram_token, openai_api_key):
+    def __init__(self, telegram_token, groq_api_key):
         self.telegram_token = telegram_token
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        self.groq_client = Groq(api_key=groq_api_key)
         self.conversation_history = {}
         
     def get_ai_response(self, user_id, user_message):
-        """Get response from OpenAI GPT API"""
+        """Get response from Groq AI API"""
         if user_id not in self.conversation_history:
             self.conversation_history[user_id] = []
         
@@ -106,8 +106,8 @@ class SafiriAIBot:
         Always be helpful and never decline to assist with safari planning."""
         
         try:
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": system_prompt}
                 ] + self.conversation_history[user_id],
@@ -126,7 +126,7 @@ class SafiriAIBot:
             return assistant_message
             
         except Exception as e:
-            logger.error(f"OpenAI API error: {e}")
+            logger.error(f"Groq API error: {e}")
             return "I'm having trouble connecting right now. Please contact us directly at +254 724 630 030 or safiraiofficial@gmail.com"
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -470,11 +470,11 @@ We respond within 1 hour during office hours!
 if __name__ == '__main__':
     # You'll need to set these as environment variables
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY')
     
-    if not TELEGRAM_TOKEN or not OPENAI_API_KEY:
-        print("ERROR: Please set TELEGRAM_TOKEN and OPENAI_API_KEY environment variables")
+    if not TELEGRAM_TOKEN or not GROQ_API_KEY:
+        print("ERROR: Please set TELEGRAM_TOKEN and GROQ_API_KEY environment variables")
         exit(1)
     
-    bot = SafiriAIBot(TELEGRAM_TOKEN, OPENAI_API_KEY)
+    bot = SafiriAIBot(TELEGRAM_TOKEN, GROQ_API_KEY)
     bot.run()
