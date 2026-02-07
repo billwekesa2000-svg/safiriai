@@ -1,13 +1,14 @@
 import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from groq import Groq
 from datetime import datetime
 import json
 from flask import Flask
 from threading import Thread
 import requests
+import re
 
 # Flask app for Render health check
 app = Flask(__name__)
@@ -28,9 +29,6 @@ def run_flask():
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Conversation states
-MAIN_MENU, SAFARI_TYPE, DATES, TRAVELERS, BUDGET, ACCOMMODATION, DIETARY, PASSPORT, EMAIL, CONFIRM, PAYMENT = range(11)
-
 # Safari packages based on Kenyan market (prices in KES)
 SAFARI_PACKAGES = {
     "masai_mara": {
@@ -39,8 +37,7 @@ SAFARI_PACKAGES = {
         "price_budget": 35000,
         "price_mid": 65000,
         "price_luxury": 120000,
-        "description": "Game drives in the famous Masai Mara, Big Five viewing, cultural visit to Masai village",
-        "includes": "Transport, accommodation, all meals, park fees, game drives"
+        "description": "Game drives in the famous Masai Mara, Big Five viewing, cultural visit to Masai village"
     },
     "amboseli": {
         "name": "Amboseli National Park",
@@ -48,8 +45,7 @@ SAFARI_PACKAGES = {
         "price_budget": 32000,
         "price_mid": 58000,
         "price_luxury": 95000,
-        "description": "Views of Mt. Kilimanjaro, large elephant herds, bird watching",
-        "includes": "Transport, accommodation, all meals, park fees, game drives"
+        "description": "Views of Mt. Kilimanjaro, large elephant herds, bird watching"
     },
     "tsavo": {
         "name": "Tsavo East & West",
@@ -57,8 +53,15 @@ SAFARI_PACKAGES = {
         "price_budget": 42000,
         "price_mid": 75000,
         "price_luxury": 130000,
-        "description": "Red elephants of Tsavo, diverse wildlife, Mzima Springs",
-        "includes": "Transport, accommodation, all meals, park fees, game drives"
+        "description": "Red elephants of Tsavo, diverse wildlife, Mzima Springs"
+    },
+    "watamu": {
+        "name": "Watamu Beach Safari",
+        "duration": "5 Days / 4 Nights",
+        "price_budget": 55000,
+        "price_mid": 95000,
+        "price_luxury": 180000,
+        "description": "Marine park, snorkeling, beach relaxation, water sports"
     },
     "coastal": {
         "name": "Coastal Beach & Safari Combo",
@@ -66,12 +69,7 @@ SAFARI_PACKAGES = {
         "price_budget": 75000,
         "price_mid": 135000,
         "price_luxury": 250000,
-        "description": "3 days safari (Masai Mara/Amboseli) + 4 days Diani/Mombasa beach",
-        "includes": "All transport, accommodation, meals, park fees, water sports"
-    },
-    "custom": {
-        "name": "Custom Safari Package",
-        "description": "Tailored to your preferences - parks, duration, budget"
+        "description": "3 days safari + 4 days beach"
     }
 }
 
@@ -81,7 +79,8 @@ class SafiriAIBot:
         self.groq_client = Groq(api_key=groq_api_key)
         self.paystack_secret = paystack_secret_key
         self.conversation_history = {}
-        self.exchange_rate = self.get_exchange_rate()  # Get initial rate
+        self.user_booking_data = {}  # Store booking data per user
+        self.exchange_rate = self.get_exchange_rate()
         
     def get_exchange_rate(self):
         """Get live KES to USD exchange rate"""
@@ -93,72 +92,17 @@ class SafiriAIBot:
             return usd_rate
         except Exception as e:
             logger.error(f"Exchange rate API error: {e}")
-            # Fallback to approximate rate if API fails
-            return 0.0077  # Approximate rate as of early 2025
+            return 0.0077  # Fallback rate
     
     def format_price_with_usd(self, kes_amount):
         """Format price showing both KES and USD"""
         usd_amount = kes_amount * self.exchange_rate
         return f"KES {kes_amount:,} (~USD {usd_amount:.0f})"
     
-    def get_ai_response(self, user_id, user_message):
-        """Get response from Groq AI API"""
-        if user_id not in self.conversation_history:
-            self.conversation_history[user_id] = []
-        
-        # Add user message to history
-        self.conversation_history[user_id].append({
-            "role": "user",
-            "content": user_message
-        })
-        
-        # Updated system prompt - minimal Swahili, no contact info by default
-        system_prompt = """You are SafiriAI's booking assistant for safari and travel experiences in Kenya.
-
-PERSONALITY:
-- Warm, enthusiastic, and professional
-- Target audience: International tourists visiting Kenya
-- Be conversational and helpful, not robotic
-
-IMPORTANT RULES:
-- Keep responses concise (2-4 sentences max unless asked for details)
-- Be helpful and friendly
-- Focus on safari planning, wildlife, and Kenya's beauty
-- NO Swahili phrases in regular conversation (only the bot uses them at specific moments)
-- NEVER mention contact details (email/phone) unless user explicitly asks how to contact support
-- If user seems stuck or there's a technical issue, THEN you may suggest they reach out for direct assistance
-
-You represent SafiriAI - a trusted Kenyan safari company specializing in unforgettable wildlife experiences."""
-        
-        try:
-            response = self.groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": system_prompt}
-                ] + self.conversation_history[user_id],
-                max_tokens=500,
-                temperature=0.8
-            )
-            
-            assistant_message = response.choices[0].message.content
-            
-            # Add assistant response to history
-            self.conversation_history[user_id].append({
-                "role": "assistant",
-                "content": assistant_message
-            })
-            
-            return assistant_message
-            
-        except Exception as e:
-            logger.error(f"Groq API error: {e}")
-            return "I'm experiencing a technical issue. Please contact our team at safiriaiofficial@gmail.com or +254 724 630 030 for immediate assistance."
-    
     def create_paystack_payment(self, email, amount, reference):
         """Create Paystack payment link"""
         url = "https://api.paystack.co/transaction/initialize"
         
-        # Log what we're sending to Paystack
         logger.info(f"Creating Paystack payment: email={email}, amount={amount}, reference={reference}")
         
         headers = {
@@ -177,7 +121,6 @@ You represent SafiriAI - a trusted Kenyan safari company specializing in unforge
             response = requests.post(url, headers=headers, json=data, timeout=10)
             result = response.json()
             
-            # Log full response for debugging
             logger.info(f"Paystack response: {result}")
             
             if result.get('status'):
@@ -185,373 +128,350 @@ You represent SafiriAI - a trusted Kenyan safari company specializing in unforge
                 logger.info(f"Payment URL generated successfully: {payment_url}")
                 return payment_url
             else:
-                # Log the exact error from Paystack
                 error_msg = result.get('message', 'Unknown error')
-                logger.error(f"Paystack returned status=False. Message: {error_msg}. Full response: {result}")
+                logger.error(f"Paystack error: {error_msg}. Full response: {result}")
                 return None
-        except requests.exceptions.Timeout:
-            logger.error("Paystack API timeout - request took too long")
-            return None
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Paystack network error: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Paystack unexpected error: {type(e).__name__} - {e}")
+            logger.error(f"Paystack error: {type(e).__name__} - {e}")
             return None
+    
+    def extract_booking_info(self, user_id):
+        """Extract and validate booking information from conversation"""
+        if user_id not in self.user_booking_data:
+            return None
+            
+        data = self.user_booking_data[user_id]
+        
+        # Check if we have all required fields
+        required = ['safari_type', 'travelers', 'budget_tier', 'email']
+        if not all(field in data for field in required):
+            return None
+            
+        return data
+    
+    def calculate_pricing(self, safari_type, num_travelers, budget_tier):
+        """Calculate pricing based on safari and budget"""
+        # Find matching safari package
+        base_price = 65000  # Default mid-range
+        
+        safari_lower = safari_type.lower()
+        if 'masai' in safari_lower or 'mara' in safari_lower:
+            if budget_tier == 'budget':
+                base_price = 35000
+            elif budget_tier == 'luxury':
+                base_price = 120000
+            else:
+                base_price = 65000
+        elif 'amboseli' in safari_lower:
+            if budget_tier == 'budget':
+                base_price = 32000
+            elif budget_tier == 'luxury':
+                base_price = 95000
+            else:
+                base_price = 58000
+        elif 'tsavo' in safari_lower:
+            if budget_tier == 'budget':
+                base_price = 42000
+            elif budget_tier == 'luxury':
+                base_price = 130000
+            else:
+                base_price = 75000
+        elif 'watamu' in safari_lower or 'beach' in safari_lower:
+            if budget_tier == 'budget':
+                base_price = 55000
+            elif budget_tier == 'luxury':
+                base_price = 180000
+            else:
+                base_price = 95000
+        elif 'coastal' in safari_lower or 'combo' in safari_lower:
+            if budget_tier == 'budget':
+                base_price = 75000
+            elif budget_tier == 'luxury':
+                base_price = 250000
+            else:
+                base_price = 135000
+        
+        safari_cost = base_price * num_travelers
+        service_fee = int(safari_cost * 0.04)  # 4% service fee
+        total = safari_cost + service_fee
+        deposit = int(total * 0.5)  # 50% deposit
+        balance = total - deposit
+        
+        return {
+            'safari_cost': safari_cost,
+            'service_fee': service_fee,
+            'total': total,
+            'deposit': deposit,
+            'balance': balance
+        }
+    
+    def get_ai_response(self, user_id, user_message):
+        """Get AI response with function calling capability"""
+        if user_id not in self.conversation_history:
+            self.conversation_history[user_id] = []
+        
+        # Add user message to history
+        self.conversation_history[user_id].append({
+            "role": "user",
+            "content": user_message
+        })
+        
+        # Enhanced system prompt with booking instructions
+        system_prompt = """You are SafiriAI's AI booking assistant for safari experiences in Kenya.
+
+PERSONALITY:
+- Warm, enthusiastic, and professional
+- Target audience: International tourists
+- Be conversational and helpful
+
+YOUR ABILITIES:
+You can help users book safaris through natural conversation. When a user wants to book or pay:
+
+1. COLLECT REQUIRED INFORMATION (ask conversationally):
+   - Safari type (Masai Mara, Amboseli, Tsavo, Watamu, Coastal Combo, or custom)
+   - Number of travelers
+   - Budget preference (budget/mid-range/luxury)
+   - Email address (for payment receipt)
+   - Optional: dates, dietary requirements, special requests
+
+2. WHEN YOU HAVE ALL INFO, RESPOND WITH THIS EXACT FORMAT:
+   [GENERATE_PAYMENT]
+   Safari: [safari name]
+   Travelers: [number]
+   Budget: [budget/mid-range/luxury]
+   Email: [email@example.com]
+   [END_PAYMENT]
+
+IMPORTANT RULES:
+- Be natural - don't ask for all info at once, collect it through conversation
+- If user says "I want to book/pay now", check what info you still need
+- Only use [GENERATE_PAYMENT] format when you have: safari type, travelers, budget, and email
+- Keep responses concise (2-4 sentences)
+- Use minimal Swahili (Jambo for greetings, Hakuna matata for reassurance)
+- NEVER mention contacting support team - YOU handle bookings directly
+- If user seems ready to pay, collect any missing info and generate payment
+
+PRICING REFERENCE (per person):
+- Masai Mara: Budget KES 35k, Mid KES 65k, Luxury KES 120k
+- Amboseli: Budget KES 32k, Mid KES 58k, Luxury KES 95k
+- Tsavo: Budget KES 42k, Mid KES 75k, Luxury KES 130k
+- Watamu Beach: Budget KES 55k, Mid KES 95k, Luxury KES 180k
+- Coastal Combo: Budget KES 75k, Mid KES 135k, Luxury KES 250k
+
+You represent SafiriAI - handle bookings confidently and professionally."""
+        
+        try:
+            response = self.groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": system_prompt}
+                ] + self.conversation_history[user_id],
+                max_tokens=800,
+                temperature=0.7
+            )
+            
+            assistant_message = response.choices[0].message.content
+            
+            # Add assistant response to history
+            self.conversation_history[user_id].append({
+                "role": "assistant",
+                "content": assistant_message
+            })
+            
+            return assistant_message
+            
+        except Exception as e:
+            logger.error(f"Groq API error: {e}")
+            return "I'm experiencing a technical issue. Let me try again - what safari were you interested in?"
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command - welcome message"""
         user = update.effective_user
+        user_id = user.id
+        
+        # Initialize user data
+        if user_id not in self.user_booking_data:
+            self.user_booking_data[user_id] = {}
         
         welcome_message = f"""Jambo {user.first_name}! Welcome to SafiriAI! 🦁🌍
 
-I'm your safari planning assistant for unforgettable Kenyan adventures.
-
-I can help you:
-- Plan your perfect safari
-- Book accommodations
-- Arrange airport transfers
-- Create custom itineraries
+I'm your AI safari assistant. I can help you:
+- Explore safari options
+- Plan your itinerary  
+- Book and pay for your safari
 
 Popular Safaris:
 🐘 Masai Mara - The Great Migration
-🗻 Amboseli - Mt. Kilimanjaro Views  
-🦏 Tsavo East & West - Red Elephants
-🏖️ Diani & Watamu - Beautiful Beaches
+🗻 Amboseli - Mt. Kilimanjaro Views
+🦏 Tsavo - Red Elephants
+🏖️ Watamu & Coastal Beaches
 
 What kind of safari experience are you looking for?"""
         
         await update.message.reply_text(welcome_message)
-        return MAIN_MENU
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle general conversation using AI"""
+        """Handle all messages with AI + payment generation"""
         user_id = update.effective_user.id
         user_message = update.message.text
         
+        # Refresh exchange rate periodically
+        self.exchange_rate = self.get_exchange_rate()
+        
         # Get AI response
-        response = self.get_ai_response(user_id, user_message)
+        ai_response = self.get_ai_response(user_id, user_message)
         
-        await update.message.reply_text(response)
-        return MAIN_MENU
-    
-    async def safari_packages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Show available safari packages"""
-        # Refresh exchange rate
-        self.exchange_rate = self.get_exchange_rate()
-        
-        packages_text = "SafiriAI Safari Packages 🦁\n\n"
-        
-        for key, pkg in SAFARI_PACKAGES.items():
-            if key != "custom":
-                packages_text += f"📍 {pkg['name']}\n"
-                packages_text += f"Duration: {pkg['duration']}\n"
-                packages_text += f"From {self.format_price_with_usd(pkg['price_budget'])} per person\n"
-                packages_text += f"{pkg['description']}\n\n"
-        
-        packages_text += "Which safari interests you? Or describe your dream safari and I'll help create it! 🌍"
-        
-        await update.message.reply_text(packages_text)
-        return MAIN_MENU
-    
-    async def book_safari(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start booking process"""
-        keyboard = [
-            ['Masai Mara Safari', 'Amboseli Safari'],
-            ['Tsavo Safari', 'Beach & Safari Combo'],
-            ['Custom Safari']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        
-        await update.message.reply_text(
-            "Wonderful! Which safari would you like to book? 🦁",
-            reply_markup=reply_markup
-        )
-        return SAFARI_TYPE
-    
-    async def safari_type_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Safari type selected"""
-        context.user_data['safari_type'] = update.message.text
-        
-        await update.message.reply_text(
-            f"Excellent choice! ✨\n\n"
-            f"When would you like to travel?\n"
-            f"Please provide your preferred dates (e.g., 'March 15-18, 2026' or 'Flexible in April 2026')",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return DATES
-    
-    async def dates_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Travel dates received"""
-        context.user_data['dates'] = update.message.text
-        
-        await update.message.reply_text(
-            "Perfect! 📅\n\n"
-            "How many travelers? (Adults and children if applicable)"
-        )
-        return TRAVELERS
-    
-    async def travelers_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Number of travelers received"""
-        context.user_data['travelers'] = update.message.text
-        
-        # Refresh exchange rate for accurate pricing
-        self.exchange_rate = self.get_exchange_rate()
-        
-        keyboard = [
-            [f'Budget ({self.format_price_with_usd(35000)} pp)'],
-            [f'Mid-Range ({self.format_price_with_usd(65000)} pp)'],
-            [f'Luxury ({self.format_price_with_usd(120000)} pp)'],
-            ['Need Recommendations']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        
-        await update.message.reply_text(
-            "What's your budget preference? 💰",
-            reply_markup=reply_markup
-        )
-        return BUDGET
-    
-    async def budget_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Budget preference received"""
-        context.user_data['budget'] = update.message.text
-        
-        keyboard = [
-            ['Tented Camps', 'Lodges'],
-            ['Hotels', 'Mix of Options'],
-            ['Surprise Me!']
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        
-        await update.message.reply_text(
-            "What type of accommodation do you prefer? 🏕️",
-            reply_markup=reply_markup
-        )
-        return ACCOMMODATION
-    
-    async def accommodation_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Accommodation preference received"""
-        context.user_data['accommodation'] = update.message.text
-        
-        await update.message.reply_text(
-            "Do you have any dietary requirements or restrictions we should know about?\n"
-            "(Vegetarian, allergies, etc. - or type 'None')",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return DIETARY
-    
-    async def dietary_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Dietary requirements received"""
-        context.user_data['dietary'] = update.message.text
-        
-        await update.message.reply_text(
-            "For booking confirmation, please provide:\n\n"
-            "1. Full name (as per passport)\n"
-            "2. Passport number\n"
-            "3. Nationality\n"
-            "4. Emergency contact number\n\n"
-            "You can send all at once or one by one."
-        )
-        return PASSPORT
-    
-    async def passport_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Passport details received"""
-        if 'passport_info' not in context.user_data:
-            context.user_data['passport_info'] = []
-        
-        context.user_data['passport_info'].append(update.message.text)
-        
-        # Ask for email
-        await update.message.reply_text(
-            "Thank you! 📧\n\n"
-            "Finally, what's your email address?\n"
-            "(We'll send your payment receipt here)"
-        )
-        return EMAIL
-    
-    async def email_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Email received - show summary"""
-        context.user_data['email'] = update.message.text
-        
-        # Show summary
-        summary = (
-            "📋 Booking Summary\n\n"
-            f"Safari: {context.user_data.get('safari_type', 'N/A')}\n"
-            f"Dates: {context.user_data.get('dates', 'N/A')}\n"
-            f"Travelers: {context.user_data.get('travelers', 'N/A')}\n"
-            f"Budget: {context.user_data.get('budget', 'N/A')}\n"
-            f"Accommodation: {context.user_data.get('accommodation', 'N/A')}\n"
-            f"Dietary: {context.user_data.get('dietary', 'N/A')}\n"
-            f"Guest Info: {', '.join(context.user_data.get('passport_info', []))}\n"
-            f"Email: {context.user_data.get('email', 'N/A')}\n\n"
-            "Is this information correct? ✅"
-        )
-        
-        keyboard = [['Yes, Proceed to Payment', 'Edit Information']]
-        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
-        
-        await update.message.reply_text(summary, reply_markup=reply_markup)
-        return CONFIRM
-    
-    async def confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle booking confirmation"""
-        response = update.message.text
-        
-        if 'Yes' in response:
-            # Refresh exchange rate for final pricing
-            self.exchange_rate = self.get_exchange_rate()
+        # Check if AI wants to generate payment
+        if '[GENERATE_PAYMENT]' in ai_response and '[END_PAYMENT]' in ai_response:
+            # Extract booking details from AI response
+            payment_block = ai_response[ai_response.find('[GENERATE_PAYMENT]'):ai_response.find('[END_PAYMENT]')+13]
             
-            # Generate quote based on package
-            safari_type = context.user_data.get('safari_type', '')
-            travelers_text = context.user_data.get('travelers', '1')
+            # Parse the booking info
+            safari_match = re.search(r'Safari: (.+)', payment_block)
+            travelers_match = re.search(r'Travelers: (\d+)', payment_block)
+            budget_match = re.search(r'Budget: (budget|mid-range|luxury)', payment_block, re.IGNORECASE)
+            email_match = re.search(r'Email: ([\w\.-]+@[\w\.-]+\.\w+)', payment_block)
             
-            # Extract number of travelers (simple parsing)
-            import re
-            num_match = re.search(r'\d+', travelers_text)
-            num_travelers = int(num_match.group()) if num_match else 1
-            
-            # Estimate price (simplified - you'd calculate properly based on budget tier)
-            base_price_pp = 65000  # Default mid-range per person
-            
-            # Try to extract budget tier from user selection
-            budget_text = context.user_data.get('budget', '').lower()
-            if 'budget' in budget_text:
-                base_price_pp = 35000
-            elif 'luxury' in budget_text:
-                base_price_pp = 120000
-            
-            # Calculate costs
-            safari_cost = base_price_pp * num_travelers
-            service_fee = int(safari_cost * 0.04)  # 4% service fee
-            total = safari_cost + service_fee
-            deposit = int(total * 0.5)  # 50% deposit
-            balance = total - deposit
-            
-            user_email = context.user_data.get('email', 'guest@safiriai.com')
-            
-            # Generate unique reference
-            reference = f"SAFARI-{update.effective_user.id}-{int(datetime.now().timestamp())}"
-            
-            # Create Paystack payment link
-            payment_url = self.create_paystack_payment(user_email, deposit, reference)
-            
-            if payment_url:
-                payment_message = f"""Thank you for choosing SafiriAI! 🎉
+            if safari_match and travelers_match and budget_match and email_match:
+                safari_type = safari_match.group(1).strip()
+                num_travelers = int(travelers_match.group(1))
+                budget_tier = budget_match.group(1).lower().replace('-', '_')
+                if budget_tier == 'mid_range':
+                    budget_tier = 'mid-range'
+                email = email_match.group(1).strip()
+                
+                # Store booking data
+                self.user_booking_data[user_id] = {
+                    'safari_type': safari_type,
+                    'travelers': num_travelers,
+                    'budget_tier': budget_tier,
+                    'email': email,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                # Calculate pricing
+                pricing = self.calculate_pricing(safari_type, num_travelers, budget_tier)
+                
+                # Generate payment reference
+                reference = f"SAFARI-{user_id}-{int(datetime.now().timestamp())}"
+                
+                # Create Paystack payment link
+                payment_url = self.create_paystack_payment(email, pricing['deposit'], reference)
+                
+                # Remove the [GENERATE_PAYMENT] block from response
+                clean_response = ai_response.replace(payment_block, '').strip()
+                
+                # Send AI response first (if there's any text before the payment block)
+                if clean_response:
+                    await update.message.reply_text(clean_response)
+                
+                # Send payment breakdown
+                payment_breakdown = f"""✅ Booking Confirmed!
 
 💰 PAYMENT BREAKDOWN:
 
-Safari Package: {self.format_price_with_usd(safari_cost)}
-Service Fee (4%): {self.format_price_with_usd(service_fee)}
+Safari Package: {self.format_price_with_usd(pricing['safari_cost'])}
+Service Fee (4%): {self.format_price_with_usd(pricing['service_fee'])}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total Cost: {self.format_price_with_usd(total)}
+Total Cost: {self.format_price_with_usd(pricing['total'])}
 
-DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
-Balance Due (14 days before safari): {self.format_price_with_usd(balance)}"""
+DEPOSIT REQUIRED (50%): {self.format_price_with_usd(pricing['deposit'])}
+Balance Due (14 days before safari): {self.format_price_with_usd(pricing['balance'])}"""
                 
-                await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
+                await update.message.reply_text(payment_breakdown)
                 
-                # Send payment link as separate message for better visibility
-                payment_link_message = f"""💳 PAY YOUR DEPOSIT NOW:
+                # Send payment link
+                if payment_url:
+                    payment_link_msg = f"""💳 PAY YOUR DEPOSIT NOW:
 
 Click this link to pay securely with your card:
 
 {payment_url}
 
 Your payment receipt will be sent to:
-{user_email}"""
-                
-                await update.message.reply_text(payment_link_message)
-                
-                # Send M-Pesa alternative
-                mpesa_message = f"""📱 OR Pay via M-Pesa (Kenya only):
+{email}"""
+                    
+                    await update.message.reply_text(payment_link_msg)
+                    
+                    # Send M-Pesa alternative
+                    mpesa_msg = f"""📱 OR Pay via M-Pesa (Kenya only):
 
 1. Go to M-Pesa menu
-2. Select "Lipa na M-Pesa"  
+2. Select "Lipa na M-Pesa"
 3. Select "Buy Goods and Services"
 4. Enter Till: 6339189
-5. Enter Amount: {deposit}
+5. Enter Amount: {pricing['deposit']}
 
-After payment, send your screenshot here for verification!
+After payment, send your screenshot here!
 
 Safari njema! 🦁🌍"""
-                
-                await update.message.reply_text(mpesa_message)
-            else:
-                # Fallback if Paystack fails
-                payment_message = f"""Thank you for choosing SafiriAI! 🎉
+                    
+                    await update.message.reply_text(mpesa_msg)
+                    
+                    # Log booking
+                    booking_data = {
+                        'timestamp': datetime.now().isoformat(),
+                        'user_id': user_id,
+                        'username': update.effective_user.username,
+                        'booking': self.user_booking_data[user_id],
+                        'pricing': pricing,
+                        'reference': reference,
+                        'payment_url': payment_url,
+                        'status': 'pending_payment'
+                    }
+                    logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
+                    
+                else:
+                    # Paystack failed
+                    error_msg = """⚠️ Payment system temporarily unavailable.
 
-💰 PAYMENT BREAKDOWN:
-
-Safari Package: {self.format_price_with_usd(safari_cost)}
-Service Fee (4%): {self.format_price_with_usd(service_fee)}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total Cost: {self.format_price_with_usd(total)}
-
-DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
-Balance Due (14 days before safari): {self.format_price_with_usd(balance)}"""
-            
-                await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
-                
-                error_message = """⚠️ We're experiencing a temporary technical issue with our payment system.
-
-Please contact us directly for payment instructions:
-
+Please contact us directly:
 📧 safiriaiofficial@gmail.com
 📞 +254 724 630 030
 
 We'll process your booking immediately!"""
-                
-                await update.message.reply_text(error_message)
-            
-            # Save booking data
-            booking_data = {
-                'timestamp': datetime.now().isoformat(),
-                'user_id': update.effective_user.id,
-                'username': update.effective_user.username,
-                'data': context.user_data,
-                'pricing': {
-                    'safari_cost': safari_cost,
-                    'service_fee': service_fee,
-                    'total': total,
-                    'deposit': deposit,
-                    'balance': balance,
-                    'exchange_rate': self.exchange_rate
-                },
-                'reference': reference,
-                'status': 'pending_payment'
-            }
-            
-            # Log booking for manual processing
-            logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
-            
-            # Final confirmation message
-            final_msg = """✅ Once payment is confirmed, we'll send your official booking details!
-
-Type /start to make another booking."""
-            
-            await update.message.reply_text(final_msg)
-            
-            return ConversationHandler.END
+                    await update.message.reply_text(error_msg)
+            else:
+                # Parsing failed - send AI response normally
+                await update.message.reply_text(ai_response)
         else:
-            await update.message.reply_text(
-                "No problem! Let's start over.\n"
-                "Type /book to begin a new booking.",
-                reply_markup=ReplyKeyboardRemove()
-            )
-            return ConversationHandler.END
+            # Normal AI response
+            await update.message.reply_text(ai_response)
+    
+    async def packages_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show safari packages"""
+        self.exchange_rate = self.get_exchange_rate()
+        
+        packages_text = "🦁 SafiriAI Safari Packages\n\n"
+        
+        for key, pkg in SAFARI_PACKAGES.items():
+            packages_text += f"📍 {pkg['name']}\n"
+            packages_text += f"Duration: {pkg['duration']}\n"
+            packages_text += f"From {self.format_price_with_usd(pkg['price_budget'])} per person\n"
+            packages_text += f"{pkg['description']}\n\n"
+        
+        packages_text += "Just tell me which one interests you and I'll help you book it!"
+        
+        await update.message.reply_text(packages_text)
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Help command"""
         help_text = """🆘 SafiriAI Help
 
+I'm your AI safari assistant! Just chat with me naturally.
+
+You can:
+- Ask about safari options
+- Get pricing information
+- Book and pay for safaris directly in chat
+- Ask questions about Kenya, wildlife, travel tips
+
 Commands:
-/start - Start conversation
-/book - Book a safari
-/packages - View safari packages  
-/contact - Contact information
+/start - Restart conversation
+/packages - View all safari packages
 /help - This message
 
-I'm here to help plan your perfect Kenyan safari! 🦁"""
+Just tell me what you're looking for! 🦁"""
         await update.message.reply_text(help_text)
     
     async def contact_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -567,53 +487,22 @@ Monday - Sunday: 8:00 AM - 8:00 PM EAT
 We respond within 1 hour!"""
         await update.message.reply_text(contact_text)
     
-    async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Cancel conversation"""
-        await update.message.reply_text(
-            "Booking cancelled. Hakuna matata! Type /start when ready to plan your safari! 🦁",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return ConversationHandler.END
-    
     def run(self):
         """Run the bot"""
         application = Application.builder().token(self.telegram_token).build()
         
-        # Start Flask server in background thread
+        # Start Flask server in background
         Thread(target=run_flask, daemon=True).start()
-
-        # Conversation handler for booking flow
-        conv_handler = ConversationHandler(
-            entry_points=[
-                CommandHandler('start', self.start),
-                CommandHandler('book', self.book_safari)
-            ],
-            states={
-                MAIN_MENU: [
-                    CommandHandler('book', self.book_safari),
-                    CommandHandler('packages', self.safari_packages),
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
-                ],
-                SAFARI_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.safari_type_selected)],
-                DATES: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.dates_received)],
-                TRAVELERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.travelers_received)],
-                BUDGET: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.budget_received)],
-                ACCOMMODATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.accommodation_received)],
-                DIETARY: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.dietary_received)],
-                PASSPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.passport_received)],
-                EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.email_received)],
-                CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.confirmation)],
-            },
-            fallbacks=[CommandHandler('cancel', self.cancel)]
-        )
         
-        application.add_handler(conv_handler)
+        # Add handlers
+        application.add_handler(CommandHandler('start', self.start))
+        application.add_handler(CommandHandler('packages', self.packages_command))
         application.add_handler(CommandHandler('help', self.help_command))
         application.add_handler(CommandHandler('contact', self.contact_command))
-        application.add_handler(CommandHandler('packages', self.safari_packages))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
         # Start bot
-        logger.info("SafiriAI Bot starting...")
+        logger.info("SafiriAI AI-Powered Bot starting...")
         application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
