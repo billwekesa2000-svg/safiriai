@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 from flask import Flask
 from threading import Thread
+import requests
 
 # Flask app for Render health check
 app = Flask(__name__)
@@ -75,9 +76,10 @@ SAFARI_PACKAGES = {
 }
 
 class SafiriAIBot:
-    def __init__(self, telegram_token, groq_api_key):
+    def __init__(self, telegram_token, groq_api_key, paystack_secret_key):
         self.telegram_token = telegram_token
         self.groq_client = Groq(api_key=groq_api_key)
+        self.paystack_secret = paystack_secret_key
         self.conversation_history = {}
         
     def get_ai_response(self, user_id, user_message):
@@ -91,19 +93,27 @@ class SafiriAIBot:
             "content": user_message
         })
         
-        # System prompt for SafiriAI
+        # Updated system prompt with Swahili and personality
         system_prompt = """You are SafiriAI's booking assistant for safari and travel experiences in Kenya. 
-        You help international tourists plan their dream Kenyan safari.
-        
-        Be warm, professional, and enthusiastic about Kenyan wildlife and culture.
-        Keep responses concise but helpful.
-        You represent SafiriAI - a trusted Kenyan safari company.
-        
-        Contact details:
-        - Email: safiraiofficial@gmail.com
-        - Phone/WhatsApp: +254 724 630 030
-        
-        Always be helpful and never decline to assist with safari planning."""
+
+PERSONALITY:
+- Warm, enthusiastic, and playful about Kenyan wildlife and culture
+- Sprinkle in Swahili phrases naturally (Jambo! Karibu! Asante! Hakuna Matata! Pole pole! Safari njema!)
+- Be conversational and fun, not robotic or salesy
+- Show genuine excitement about Kenya's beauty
+
+IMPORTANT RULES:
+- Keep responses concise (2-4 sentences max unless asked for details)
+- ONLY mention contact details (email/phone) if user seems stuck, confused, or explicitly asks how to reach you
+- DON'T add contact info to every response - it's annoying and repetitive
+- Use Swahili greetings occasionally but don't overdo it
+- Be helpful and friendly
+
+Contact details (use ONLY when necessary):
+- Email: safiraiofficial@gmail.com
+- Phone/WhatsApp: +254 724 630 030
+
+You represent SafiriAI - a trusted Kenyan safari company."""
         
         try:
             response = self.groq_client.chat.completions.create(
@@ -112,7 +122,7 @@ class SafiriAIBot:
                     {"role": "system", "content": system_prompt}
                 ] + self.conversation_history[user_id],
                 max_tokens=500,
-                temperature=0.7
+                temperature=0.8
             )
             
             assistant_message = response.choices[0].message.content
@@ -127,15 +137,45 @@ class SafiriAIBot:
             
         except Exception as e:
             logger.error(f"Groq API error: {e}")
-            return "I'm having trouble connecting right now. Please contact us directly at +254 724 630 030 or safiraiofficial@gmail.com"
+            return "Pole pole! I'm having a small tech hiccup. Please reach out directly at +254 724 630 030 or safiraiofficial@gmail.com and we'll help you right away!"
+    
+    def create_paystack_payment(self, email, amount, reference):
+        """Create Paystack payment link"""
+        url = "https://api.paystack.co/transaction/initialize"
+        
+        headers = {
+            "Authorization": f"Bearer {self.paystack_secret}",
+            "Content-Type": "application/json"
+        }
+        
+        data = {
+            "email": email,
+            "amount": int(amount * 100),  # Paystack uses kobo/cents
+            "reference": reference,
+            "currency": "KES",
+            "callback_url": "https://safiriai.com/payment-success"
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            result = response.json()
+            
+            if result.get('status'):
+                return result['data']['authorization_url']
+            else:
+                logger.error(f"Paystack error: {result}")
+                return None
+        except Exception as e:
+            logger.error(f"Paystack API error: {e}")
+            return None
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start command - welcome message"""
         user = update.effective_user
         
-        welcome_message = f"""Welcome to SafiriAI!
+        welcome_message = f"""Jambo {user.first_name}! Welcome to SafiriAI! 🦁🌍
 
-Hello {user.first_name}! I'm your safari planning assistant for unforgettable Kenyan adventures.
+I'm your safari planning assistant for unforgettable Kenyan adventures.
 
 I can help you:
 - Plan your perfect safari
@@ -144,18 +184,18 @@ I can help you:
 - Create custom itineraries
 
 Popular Safaris:
-- Masai Mara - The Great Migration
-- Amboseli - Mt. Kilimanjaro Views  
-- Tsavo East & West - Red Elephants
-- Beach & Safari Combos
+🐘 Masai Mara - The Great Migration
+🗻 Amboseli - Mt. Kilimanjaro Views  
+🦏 Tsavo East & West - Red Elephants
+🏖️ Diani & Watamu - Beautiful Beaches
 
-What kind of safari experience are you looking for?"""
+What kind of safari experience are you looking for? Karibu sana!"""
         
         await update.message.reply_text(welcome_message)
         return MAIN_MENU
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle general conversation using GPT"""
+        """Handle general conversation using AI"""
         user_id = update.effective_user.id
         user_message = update.message.text
         
@@ -167,7 +207,7 @@ What kind of safari experience are you looking for?"""
     
     async def safari_packages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show available safari packages"""
-        packages_text = "SafiriAI Safari Packages\n\n"
+        packages_text = "SafiriAI Safari Packages 🦁\n\n"
         
         for key, pkg in SAFARI_PACKAGES.items():
             if key != "custom":
@@ -176,7 +216,7 @@ What kind of safari experience are you looking for?"""
                 packages_text += f"From KES {pkg['price_budget']:,} per person\n"
                 packages_text += f"{pkg['description']}\n\n"
         
-        packages_text += "\nTell me which safari interests you, or describe your dream safari!"
+        packages_text += "Which safari interests you? Or describe your dream safari and I'll help create it! 🌍"
         
         await update.message.reply_text(packages_text)
         return MAIN_MENU
@@ -191,7 +231,7 @@ What kind of safari experience are you looking for?"""
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            "Great! Which safari would you like to book?",
+            "Wonderful! Which safari would you like to book? 🦁",
             reply_markup=reply_markup
         )
         return SAFARI_TYPE
@@ -201,7 +241,7 @@ What kind of safari experience are you looking for?"""
         context.user_data['safari_type'] = update.message.text
         
         await update.message.reply_text(
-            f"Excellent choice!\n\n"
+            f"Excellent choice! ✨\n\n"
             f"When would you like to travel?\n"
             f"Please provide your preferred dates (e.g., 'March 15-18, 2026' or 'Flexible in April 2026')",
             reply_markup=ReplyKeyboardRemove()
@@ -213,7 +253,7 @@ What kind of safari experience are you looking for?"""
         context.user_data['dates'] = update.message.text
         
         await update.message.reply_text(
-            "Perfect!\n\n"
+            "Perfect! 📅\n\n"
             "How many travelers? (Adults and children if applicable)"
         )
         return TRAVELERS
@@ -229,7 +269,7 @@ What kind of safari experience are you looking for?"""
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            "What's your budget preference?",
+            "What's your budget preference? 💰",
             reply_markup=reply_markup
         )
         return BUDGET
@@ -246,7 +286,7 @@ What kind of safari experience are you looking for?"""
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            "What type of accommodation do you prefer?",
+            "What type of accommodation do you prefer? 🏕️",
             reply_markup=reply_markup
         )
         return ACCOMMODATION
@@ -269,9 +309,10 @@ What kind of safari experience are you looking for?"""
         await update.message.reply_text(
             "For booking confirmation, please provide:\n\n"
             "1. Full name (as per passport)\n"
-            "2. Passport number\n"
-            "3. Nationality\n"
-            "4. Emergency contact number\n\n"
+            "2. Email address\n"
+            "3. Passport number\n"
+            "4. Nationality\n"
+            "5. Emergency contact number\n\n"
             "You can send all at once or one by one."
         )
         return PASSPORT
@@ -285,7 +326,7 @@ What kind of safari experience are you looking for?"""
         
         # Show summary
         summary = (
-            "Booking Summary\n\n"
+            "📋 Booking Summary\n\n"
             f"Safari: {context.user_data.get('safari_type', 'N/A')}\n"
             f"Dates: {context.user_data.get('dates', 'N/A')}\n"
             f"Travelers: {context.user_data.get('travelers', 'N/A')}\n"
@@ -293,7 +334,7 @@ What kind of safari experience are you looking for?"""
             f"Accommodation: {context.user_data.get('accommodation', 'N/A')}\n"
             f"Dietary: {context.user_data.get('dietary', 'N/A')}\n"
             f"Guest Info: {', '.join(context.user_data.get('passport_info', []))}\n\n"
-            "Is this information correct?"
+            "Is this information correct? ✅"
         )
         
         keyboard = [['Yes, Proceed to Payment', 'Edit Information']]
@@ -321,38 +362,69 @@ What kind of safari experience are you looking for?"""
             total = base_price * num_travelers
             deposit = int(total * 0.3)  # 30% deposit
             
-            payment_message = f"""Payment Information
+            # Extract email from passport info
+            guest_info = ' '.join(context.user_data.get('passport_info', []))
+            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', guest_info)
+            user_email = email_match.group(0) if email_match else "guest@safiriai.com"
+            
+            # Generate unique reference
+            reference = f"SAFARI-{update.effective_user.id}-{int(datetime.now().timestamp())}"
+            
+            # Create Paystack payment link
+            payment_url = self.create_paystack_payment(user_email, deposit, reference)
+            
+            if payment_url:
+                payment_message = f"""Asante sana! 🎉
 
 Total Estimate: KES {total:,}
 Deposit Required (30%): KES {deposit:,}
 Balance: KES {total - deposit:,} (payable before safari)
 
-M-Pesa Payment Instructions:
+PAYMENT OPTIONS:
 
+💳 OPTION 1 - Card Payment (Recommended):
+Click here to pay securely with Paystack:
+{payment_url}
+
+📱 OPTION 2 - M-Pesa (Kenya only):
 1. Go to M-Pesa menu
 2. Select "Lipa na M-Pesa"
 3. Select "Buy Goods and Services"
 4. Enter Till Number: 6339189
-   (Business Name: Rajiv Okemwa)
 5. Enter Amount: {deposit}
-6. Enter your M-Pesa PIN
 
-After Payment:
-- Screenshot the M-Pesa confirmation message
-- Send it here in the chat
+After payment, send your confirmation screenshot here!
 
-Our team will verify and send your official booking confirmation within 1 hour!
+Our team will verify and send your official booking confirmation within 1 hour.
 
-Questions?
-Phone/WhatsApp: +254 724 630 030
-Email: safiraiofficial@gmail.com
+Safari njema! 🦁🌍"""
+            else:
+                # Fallback if Paystack fails
+                payment_message = f"""Asante sana! 🎉
 
-We're excited to host you in Kenya!
-"""
+Total Estimate: KES {total:,}
+Deposit Required (30%): KES {deposit:,}
+Balance: KES {total - deposit:,} (payable before safari)
+
+PAYMENT OPTIONS:
+
+📱 M-Pesa Payment:
+1. Go to M-Pesa menu
+2. Select "Lipa na M-Pesa"
+3. Select "Buy Goods and Services"
+4. Enter Till Number: 6339189
+5. Enter Amount: {deposit}
+
+💳 Card/Bank Transfer:
+Contact us at safiraiofficial@gmail.com or +254 724 630 030
+
+After payment, send your confirmation screenshot here!
+
+Safari njema! 🦁🌍"""
             
             await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
             
-            # Save booking data (you'd save to database here)
+            # Save booking data
             booking_data = {
                 'timestamp': datetime.now().isoformat(),
                 'user_id': update.effective_user.id,
@@ -360,6 +432,7 @@ We're excited to host you in Kenya!
                 'data': context.user_data,
                 'total': total,
                 'deposit': deposit,
+                'reference': reference,
                 'status': 'pending_payment'
             }
             
@@ -367,14 +440,14 @@ We're excited to host you in Kenya!
             logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
             
             await update.message.reply_text(
-                "Once you send the M-Pesa screenshot, we'll confirm your booking!\n\n"
-                "Type /start to make another booking or /help for assistance."
+                "Once payment is confirmed, we'll send your official booking details! ✅\n\n"
+                "Type /start for a new booking or /help for assistance."
             )
             
             return ConversationHandler.END
         else:
             await update.message.reply_text(
-                "No problem! Let's start over.\n"
+                "Hakuna matata! Let's start over.\n"
                 "Type /book to begin a new booking.",
                 reply_markup=ReplyKeyboardRemove()
             )
@@ -382,7 +455,7 @@ We're excited to host you in Kenya!
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Help command"""
-        help_text = """SafiriAI Help
+        help_text = """🆘 SafiriAI Help
 
 Commands:
 /start - Start conversation
@@ -391,17 +464,16 @@ Commands:
 /contact - Contact information
 /help - This message
 
-Need Human Help?
-Phone/WhatsApp: +254 724 630 030
-Email: safiraiofficial@gmail.com
+Need to speak with us?
+📞 +254 724 630 030 (Call/WhatsApp)
+📧 safiraiofficial@gmail.com
 
-We're here 24/7 to help plan your perfect Kenyan safari!
-"""
+We're here to help! Karibu! 🦁"""
         await update.message.reply_text(help_text)
     
     async def contact_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Contact information"""
-        contact_text = """Contact SafiriAI
+        contact_text = """📞 Contact SafiriAI
 
 Phone/WhatsApp:
 +254 724 630 030
@@ -412,17 +484,13 @@ safiraiofficial@gmail.com
 Office Hours:
 Monday - Sunday: 8:00 AM - 8:00 PM EAT
 
-Emergency Contact:
-24/7 support for booked guests
-
-We respond within 1 hour during office hours!
-"""
+We respond within 1 hour! Karibu sana! 🦁"""
         await update.message.reply_text(contact_text)
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel conversation"""
         await update.message.reply_text(
-            "Booking cancelled. Type /start when you're ready to plan your safari!",
+            "Booking cancelled. Hakuna matata! Type /start when ready to plan your safari! 🦁",
             reply_markup=ReplyKeyboardRemove()
         )
         return ConversationHandler.END
@@ -468,13 +536,14 @@ We respond within 1 hour during office hours!
         application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    # You'll need to set these as environment variables
+    # Environment variables
     TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
     GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+    PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY')
     
-    if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-        print("ERROR: Please set TELEGRAM_TOKEN and GROQ_API_KEY environment variables")
+    if not TELEGRAM_TOKEN or not GROQ_API_KEY or not PAYSTACK_SECRET_KEY:
+        print("ERROR: Please set TELEGRAM_TOKEN, GROQ_API_KEY, and PAYSTACK_SECRET_KEY environment variables")
         exit(1)
     
-    bot = SafiriAIBot(TELEGRAM_TOKEN, GROQ_API_KEY)
+    bot = SafiriAIBot(TELEGRAM_TOKEN, GROQ_API_KEY, PAYSTACK_SECRET_KEY)
     bot.run()
