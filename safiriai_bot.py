@@ -29,9 +29,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Conversation states
-MAIN_MENU, SAFARI_TYPE, DATES, TRAVELERS, BUDGET, ACCOMMODATION, DIETARY, PASSPORT, CONFIRM, PAYMENT = range(10)
+MAIN_MENU, SAFARI_TYPE, DATES, TRAVELERS, BUDGET, ACCOMMODATION, DIETARY, PASSPORT, EMAIL, CONFIRM, PAYMENT = range(11)
 
-# Safari packages based on Kenyan market
+# Safari packages based on Kenyan market (prices in KES)
 SAFARI_PACKAGES = {
     "masai_mara": {
         "name": "Masai Mara Safari",
@@ -81,7 +81,26 @@ class SafiriAIBot:
         self.groq_client = Groq(api_key=groq_api_key)
         self.paystack_secret = paystack_secret_key
         self.conversation_history = {}
+        self.exchange_rate = self.get_exchange_rate()  # Get initial rate
         
+    def get_exchange_rate(self):
+        """Get live KES to USD exchange rate"""
+        try:
+            response = requests.get("https://api.exchangerate-api.com/v4/latest/KES", timeout=5)
+            data = response.json()
+            usd_rate = data['rates']['USD']
+            logger.info(f"Exchange rate fetched: 1 KES = {usd_rate} USD")
+            return usd_rate
+        except Exception as e:
+            logger.error(f"Exchange rate API error: {e}")
+            # Fallback to approximate rate if API fails
+            return 0.0077  # Approximate rate as of early 2025
+    
+    def format_price_with_usd(self, kes_amount):
+        """Format price showing both KES and USD"""
+        usd_amount = kes_amount * self.exchange_rate
+        return f"KES {kes_amount:,} (~USD {usd_amount:.0f})"
+    
     def get_ai_response(self, user_id, user_message):
         """Get response from Groq AI API"""
         if user_id not in self.conversation_history:
@@ -93,27 +112,23 @@ class SafiriAIBot:
             "content": user_message
         })
         
-        # Updated system prompt with Swahili and personality
-        system_prompt = """You are SafiriAI's booking assistant for safari and travel experiences in Kenya. 
+        # Updated system prompt - minimal Swahili, no contact info by default
+        system_prompt = """You are SafiriAI's booking assistant for safari and travel experiences in Kenya.
 
 PERSONALITY:
-- Warm, enthusiastic, and playful about Kenyan wildlife and culture
-- Sprinkle in Swahili phrases naturally (Jambo! Karibu! Asante! Hakuna Matata! Pole pole! Safari njema!)
-- Be conversational and fun, not robotic or salesy
-- Show genuine excitement about Kenya's beauty
+- Warm, enthusiastic, and professional
+- Target audience: International tourists visiting Kenya
+- Be conversational and helpful, not robotic
 
 IMPORTANT RULES:
 - Keep responses concise (2-4 sentences max unless asked for details)
-- ONLY mention contact details (email/phone) if user seems stuck, confused, or explicitly asks how to reach you
-- DON'T add contact info to every response - it's annoying and repetitive
-- Use Swahili greetings occasionally but don't overdo it
 - Be helpful and friendly
+- Focus on safari planning, wildlife, and Kenya's beauty
+- NO Swahili phrases in regular conversation (only the bot uses them at specific moments)
+- NEVER mention contact details (email/phone) unless user explicitly asks how to contact support
+- If user seems stuck or there's a technical issue, THEN you may suggest they reach out for direct assistance
 
-Contact details (use ONLY when necessary):
-- Email: safiraiofficial@gmail.com
-- Phone/WhatsApp: +254 724 630 030
-
-You represent SafiriAI - a trusted Kenyan safari company."""
+You represent SafiriAI - a trusted Kenyan safari company specializing in unforgettable wildlife experiences."""
         
         try:
             response = self.groq_client.chat.completions.create(
@@ -137,7 +152,7 @@ You represent SafiriAI - a trusted Kenyan safari company."""
             
         except Exception as e:
             logger.error(f"Groq API error: {e}")
-            return "Pole pole! I'm having a small tech hiccup. Please reach out directly at +254 724 630 030 or safiraiofficial@gmail.com and we'll help you right away!"
+            return "I'm experiencing a technical issue. Please contact our team at safiriaiofficial@gmail.com or +254 724 630 030 for immediate assistance."
     
     def create_paystack_payment(self, email, amount, reference):
         """Create Paystack payment link"""
@@ -189,7 +204,7 @@ Popular Safaris:
 🦏 Tsavo East & West - Red Elephants
 🏖️ Diani & Watamu - Beautiful Beaches
 
-What kind of safari experience are you looking for? Karibu sana!"""
+What kind of safari experience are you looking for?"""
         
         await update.message.reply_text(welcome_message)
         return MAIN_MENU
@@ -207,13 +222,16 @@ What kind of safari experience are you looking for? Karibu sana!"""
     
     async def safari_packages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show available safari packages"""
+        # Refresh exchange rate
+        self.exchange_rate = self.get_exchange_rate()
+        
         packages_text = "SafiriAI Safari Packages 🦁\n\n"
         
         for key, pkg in SAFARI_PACKAGES.items():
             if key != "custom":
-                packages_text += f"{pkg['name']}\n"
+                packages_text += f"📍 {pkg['name']}\n"
                 packages_text += f"Duration: {pkg['duration']}\n"
-                packages_text += f"From KES {pkg['price_budget']:,} per person\n"
+                packages_text += f"From {self.format_price_with_usd(pkg['price_budget'])} per person\n"
                 packages_text += f"{pkg['description']}\n\n"
         
         packages_text += "Which safari interests you? Or describe your dream safari and I'll help create it! 🌍"
@@ -262,9 +280,14 @@ What kind of safari experience are you looking for? Karibu sana!"""
         """Number of travelers received"""
         context.user_data['travelers'] = update.message.text
         
+        # Refresh exchange rate for accurate pricing
+        self.exchange_rate = self.get_exchange_rate()
+        
         keyboard = [
-            ['Budget (KES 30-45k pp)', 'Mid-Range (KES 55-80k pp)'],
-            ['Luxury (KES 95k+ pp)', 'Need Recommendations']
+            [f'Budget ({self.format_price_with_usd(35000)} pp)'],
+            [f'Mid-Range ({self.format_price_with_usd(65000)} pp)'],
+            [f'Luxury ({self.format_price_with_usd(120000)} pp)'],
+            ['Need Recommendations']
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
@@ -309,10 +332,9 @@ What kind of safari experience are you looking for? Karibu sana!"""
         await update.message.reply_text(
             "For booking confirmation, please provide:\n\n"
             "1. Full name (as per passport)\n"
-            "2. Email address\n"
-            "3. Passport number\n"
-            "4. Nationality\n"
-            "5. Emergency contact number\n\n"
+            "2. Passport number\n"
+            "3. Nationality\n"
+            "4. Emergency contact number\n\n"
             "You can send all at once or one by one."
         )
         return PASSPORT
@@ -324,6 +346,18 @@ What kind of safari experience are you looking for? Karibu sana!"""
         
         context.user_data['passport_info'].append(update.message.text)
         
+        # Ask for email
+        await update.message.reply_text(
+            "Thank you! 📧\n\n"
+            "Finally, what's your email address?\n"
+            "(We'll send your payment receipt here)"
+        )
+        return EMAIL
+    
+    async def email_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Email received - show summary"""
+        context.user_data['email'] = update.message.text
+        
         # Show summary
         summary = (
             "📋 Booking Summary\n\n"
@@ -333,7 +367,8 @@ What kind of safari experience are you looking for? Karibu sana!"""
             f"Budget: {context.user_data.get('budget', 'N/A')}\n"
             f"Accommodation: {context.user_data.get('accommodation', 'N/A')}\n"
             f"Dietary: {context.user_data.get('dietary', 'N/A')}\n"
-            f"Guest Info: {', '.join(context.user_data.get('passport_info', []))}\n\n"
+            f"Guest Info: {', '.join(context.user_data.get('passport_info', []))}\n"
+            f"Email: {context.user_data.get('email', 'N/A')}\n\n"
             "Is this information correct? ✅"
         )
         
@@ -348,6 +383,9 @@ What kind of safari experience are you looking for? Karibu sana!"""
         response = update.message.text
         
         if 'Yes' in response:
+            # Refresh exchange rate for final pricing
+            self.exchange_rate = self.get_exchange_rate()
+            
             # Generate quote based on package
             safari_type = context.user_data.get('safari_type', '')
             travelers_text = context.user_data.get('travelers', '1')
@@ -357,15 +395,24 @@ What kind of safari experience are you looking for? Karibu sana!"""
             num_match = re.search(r'\d+', travelers_text)
             num_travelers = int(num_match.group()) if num_match else 1
             
-            # Estimate price (simplified - you'd calculate properly)
-            base_price = 50000  # Default mid-range
-            total = base_price * num_travelers
-            deposit = int(total * 0.3)  # 30% deposit
+            # Estimate price (simplified - you'd calculate properly based on budget tier)
+            base_price_pp = 65000  # Default mid-range per person
             
-            # Extract email from passport info
-            guest_info = ' '.join(context.user_data.get('passport_info', []))
-            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', guest_info)
-            user_email = email_match.group(0) if email_match else "guest@safiriai.com"
+            # Try to extract budget tier from user selection
+            budget_text = context.user_data.get('budget', '').lower()
+            if 'budget' in budget_text:
+                base_price_pp = 35000
+            elif 'luxury' in budget_text:
+                base_price_pp = 120000
+            
+            # Calculate costs
+            safari_cost = base_price_pp * num_travelers
+            service_fee = int(safari_cost * 0.04)  # 4% service fee
+            total = safari_cost + service_fee
+            deposit = int(total * 0.5)  # 50% deposit
+            balance = total - deposit
+            
+            user_email = context.user_data.get('email', 'guest@safiriai.com')
             
             # Generate unique reference
             reference = f"SAFARI-{update.effective_user.id}-{int(datetime.now().timestamp())}"
@@ -374,53 +421,63 @@ What kind of safari experience are you looking for? Karibu sana!"""
             payment_url = self.create_paystack_payment(user_email, deposit, reference)
             
             if payment_url:
-                payment_message = f"""Asante sana! 🎉
+                payment_message = f"""Thank you for choosing SafiriAI! 🎉
 
-Total Estimate: KES {total:,}
-Deposit Required (30%): KES {deposit:,}
-Balance: KES {total - deposit:,} (payable before safari)
+💰 PAYMENT BREAKDOWN:
 
-PAYMENT OPTIONS:
+Safari Package: {self.format_price_with_usd(safari_cost)}
+Service Fee (4%): {self.format_price_with_usd(service_fee)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Cost: {self.format_price_with_usd(total)}
 
-💳 OPTION 1 - Card Payment (Recommended):
-Click here to pay securely with Paystack:
+DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
+Balance Due (14 days before safari): {self.format_price_with_usd(balance)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💳 PAYMENT OPTIONS:
+
+OPTION 1 - International Card Payment (Recommended):
+👉 Click here to pay securely:
 {payment_url}
+
+Your receipt will be sent to: {user_email}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📱 OPTION 2 - M-Pesa (Kenya only):
 1. Go to M-Pesa menu
 2. Select "Lipa na M-Pesa"
 3. Select "Buy Goods and Services"
-4. Enter Till Number: 6339189
+4. Enter Till: 6339189
 5. Enter Amount: {deposit}
 
-After payment, send your confirmation screenshot here!
-
-Our team will verify and send your official booking confirmation within 1 hour.
+After payment, send your confirmation screenshot here and we'll verify within 1 hour!
 
 Safari njema! 🦁🌍"""
             else:
                 # Fallback if Paystack fails
-                payment_message = f"""Asante sana! 🎉
+                payment_message = f"""Thank you for choosing SafiriAI! 🎉
 
-Total Estimate: KES {total:,}
-Deposit Required (30%): KES {deposit:,}
-Balance: KES {total - deposit:,} (payable before safari)
+💰 PAYMENT BREAKDOWN:
 
-PAYMENT OPTIONS:
+Safari Package: {self.format_price_with_usd(safari_cost)}
+Service Fee (4%): {self.format_price_with_usd(service_fee)}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Cost: {self.format_price_with_usd(total)}
 
-📱 M-Pesa Payment:
-1. Go to M-Pesa menu
-2. Select "Lipa na M-Pesa"
-3. Select "Buy Goods and Services"
-4. Enter Till Number: 6339189
-5. Enter Amount: {deposit}
+DEPOSIT REQUIRED (50%): {self.format_price_with_usd(deposit)}
+Balance Due (14 days before safari): {self.format_price_with_usd(balance)}
 
-💳 Card/Bank Transfer:
-Contact us at safiraiofficial@gmail.com or +254 724 630 030
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-After payment, send your confirmation screenshot here!
+We're experiencing a temporary technical issue with our payment system.
 
-Safari njema! 🦁🌍"""
+Please contact us directly for payment instructions:
+📧 safiriaiofficial@gmail.com
+📞 +254 724 630 030
+
+We'll process your booking immediately!"""
             
             await update.message.reply_text(payment_message, reply_markup=ReplyKeyboardRemove())
             
@@ -430,8 +487,14 @@ Safari njema! 🦁🌍"""
                 'user_id': update.effective_user.id,
                 'username': update.effective_user.username,
                 'data': context.user_data,
-                'total': total,
-                'deposit': deposit,
+                'pricing': {
+                    'safari_cost': safari_cost,
+                    'service_fee': service_fee,
+                    'total': total,
+                    'deposit': deposit,
+                    'balance': balance,
+                    'exchange_rate': self.exchange_rate
+                },
                 'reference': reference,
                 'status': 'pending_payment'
             }
@@ -440,14 +503,14 @@ Safari njema! 🦁🌍"""
             logger.info(f"NEW BOOKING: {json.dumps(booking_data, indent=2)}")
             
             await update.message.reply_text(
-                "Once payment is confirmed, we'll send your official booking details! ✅\n\n"
-                "Type /start for a new booking or /help for assistance."
+                "Once payment is confirmed, we'll send your official booking confirmation! ✅\n\n"
+                "Type /start for a new booking."
             )
             
             return ConversationHandler.END
         else:
             await update.message.reply_text(
-                "Hakuna matata! Let's start over.\n"
+                "No problem! Let's start over.\n"
                 "Type /book to begin a new booking.",
                 reply_markup=ReplyKeyboardRemove()
             )
@@ -464,27 +527,20 @@ Commands:
 /contact - Contact information
 /help - This message
 
-Need to speak with us?
-📞 +254 724 630 030 (Call/WhatsApp)
-📧 safiraiofficial@gmail.com
-
-We're here to help! Karibu! 🦁"""
+I'm here to help plan your perfect Kenyan safari! 🦁"""
         await update.message.reply_text(help_text)
     
     async def contact_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Contact information"""
         contact_text = """📞 Contact SafiriAI
 
-Phone/WhatsApp:
-+254 724 630 030
-
-Email:
-safiraiofficial@gmail.com
+Email: safiriaiofficial@gmail.com
+Phone/WhatsApp: +254 724 630 030
 
 Office Hours:
 Monday - Sunday: 8:00 AM - 8:00 PM EAT
 
-We respond within 1 hour! Karibu sana! 🦁"""
+We respond within 1 hour!"""
         await update.message.reply_text(contact_text)
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -521,6 +577,7 @@ We respond within 1 hour! Karibu sana! 🦁"""
                 ACCOMMODATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.accommodation_received)],
                 DIETARY: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.dietary_received)],
                 PASSPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.passport_received)],
+                EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.email_received)],
                 CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.confirmation)],
             },
             fallbacks=[CommandHandler('cancel', self.cancel)]
